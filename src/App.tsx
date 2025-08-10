@@ -161,8 +161,6 @@ function AppRoutes() {
         {user.role === 'CAREWORKER' ? (
           <>
             <Route path="/dashboard" element={<CareWorkerHome />} />
-            <Route path="/clock-in" element={<CareWorkerHome />} />
-            <Route path="/clock-out" element={<CareWorkerHome />} />
             <Route path="/history" element={<CareWorkerHistory />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

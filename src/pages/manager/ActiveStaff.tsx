@@ -1,8 +1,8 @@
-import React from 'react';
-import { Table, Card, Typography, Tag, Badge } from 'antd';
-import { EnvironmentOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, EnvironmentOutlined } from '@ant-design/icons';
+import { Alert, Badge, Card, Spin, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
+import React, { useEffect, useState } from 'react';
 
 dayjs.extend(duration);
 
@@ -10,72 +10,101 @@ const { Title } = Typography;
 
 interface ActiveStaffMember {
   id: string;
+  auth0Id: string;
   name: string;
-  clockInTime: string;
-  location: string;
-  duration: string;
-  coordinates: {
-    lat: number;
-    lng: number;
+  email: string;
+  role: string;
+  shiftId: string;
+  clockInAt: string;
+  clockInLocation: {
+    latitude: number;
+    longitude: number;
   };
+  note?: string;
+  status: string;
 }
 
 const ActiveStaff: React.FC = () => {
-  // Enhanced mock data for currently clocked-in staff
-  const activeStaffData: ActiveStaffMember[] = [
-    {
-      id: '1',
-      name: 'Alice Johnson',
-      clockInTime: dayjs().subtract(3, 'hour').format('h:mm A'),
-      location: 'Healthcare Center A',
-      duration: '3h 15m',
-      coordinates: { lat: 37.7749, lng: -122.4194 }
-    },
-    {
-      id: '2',
-      name: 'David Wilson',
-      clockInTime: dayjs().subtract(2, 'hour').format('h:mm A'),
-      location: 'Healthcare Center B',
-      duration: '2h 30m',
-      coordinates: { lat: 37.7849, lng: -122.4094 }
-    },
-    {
-      id: '3',
-      name: 'Emma Brown',
-      clockInTime: dayjs().subtract(4, 'hour').format('h:mm A'),
-      location: 'Healthcare Center A',
-      duration: '4h 45m',
-      coordinates: { lat: 37.7749, lng: -122.4194 }
-    },
-    {
-      id: '4',
-      name: 'Frank Miller',
-      clockInTime: dayjs().subtract(1, 'hour').format('h:mm A'),
-      location: 'Emergency Response Unit',
-      duration: '1h 20m',
-      coordinates: { lat: 37.7949, lng: -122.3994 }
+  const [activeStaff, setActiveStaff] = useState<ActiveStaffMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch active staff data from the API
+  const fetchActiveStaff = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/staff/active`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch active staff: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('Active staff data:', data);
+      setActiveStaff(data);
+    } catch (err) {
+      console.error('Error fetching active staff:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch active staff');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  useEffect(() => {
+    fetchActiveStaff();
+    
+    // Refresh data every 30 seconds
+    const interval = setInterval(fetchActiveStaff, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate duration for each staff member
+  const getStaffWithDuration = (staff: ActiveStaffMember[]) => {
+    return staff.map(member => {
+      const clockInTime = dayjs(member.clockInAt);
+      const now = dayjs();
+      const durationObj = dayjs.duration(now.diff(clockInTime));
+      
+      const hours = Math.floor(durationObj.asHours());
+      const minutes = durationObj.minutes();
+      
+      return {
+        ...member,
+        clockInTimeFormatted: clockInTime.format('h:mm A'),
+        duration: hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`,
+        durationMinutes: Math.floor(durationObj.asMinutes())
+      };
+    });
+  };
+
+  const staffWithDuration = getStaffWithDuration(activeStaff);
 
   const columns = [
     {
       title: 'Staff Member',
       dataIndex: 'name',
       key: 'name',
-      sorter: (a: ActiveStaffMember, b: ActiveStaffMember) => a.name.localeCompare(b.name),
-      render: (name: string) => (
+      sorter: (a: any, b: any) => a.name.localeCompare(b.name),
+      render: (name: string, record: any) => (
         <div className="flex items-center">
           <Badge status="processing" className="mr-2" />
-          <strong>{name}</strong>
+          <div>
+            <strong>{name}</strong>
+            <div className="text-xs text-gray-500">{record.email}</div>
+          </div>
         </div>
       ),
     },
     {
       title: 'Clock In Time',
-      dataIndex: 'clockInTime',
+      dataIndex: 'clockInTimeFormatted',
       key: 'clockInTime',
-      sorter: (a: ActiveStaffMember, b: ActiveStaffMember) => 
-        dayjs(a.clockInTime, 'h:mm A').unix() - dayjs(b.clockInTime, 'h:mm A').unix(),
+      sorter: (a: any, b: any) => dayjs(a.clockInAt).unix() - dayjs(b.clockInAt).unix(),
       render: (time: string) => (
         <div className="flex items-center">
           <ClockCircleOutlined className="mr-2 text-blue-500" />
@@ -87,55 +116,119 @@ const ActiveStaff: React.FC = () => {
       title: 'Duration',
       dataIndex: 'duration',
       key: 'duration',
-      sorter: (a: ActiveStaffMember, b: ActiveStaffMember) => {
-        const aDuration = parseFloat(a.duration.replace('h', '').replace('m', ''));
-        const bDuration = parseFloat(b.duration.replace('h', '').replace('m', ''));
-        return aDuration - bDuration;
-      },
+      sorter: (a: any, b: any) => a.durationMinutes - b.durationMinutes,
       render: (duration: string) => (
         <Tag color="blue">{duration}</Tag>
       ),
     },
     {
       title: 'Location',
-      dataIndex: 'location',
+      dataIndex: 'clockInLocation',
       key: 'location',
-      render: (location: string, record: ActiveStaffMember) => (
+      render: (location: { latitude: number; longitude: number }) => (
         <div>
           <div className="flex items-center">
             <EnvironmentOutlined className="mr-2 text-green-500" />
-            {location}
+            Work Location
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {record.coordinates.lat}, {record.coordinates.lng}
+            {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
           </div>
+        </div>
+      ),
+    },
+    {
+      title: 'Note',
+      dataIndex: 'note',
+      key: 'note',
+      render: (note: string) => (
+        <div className="max-w-xs">
+          {note ? (
+            <span className="text-sm text-gray-600">{note}</span>
+          ) : (
+            <span className="text-xs text-gray-400 italic">No note</span>
+          )}
         </div>
       ),
     },
     {
       title: 'Actions',
       key: 'actions',
-      render: (_, record: ActiveStaffMember) => (
+      render: (_: any, record: any) => (
         <div className="space-x-2">
-          <a href="#" className="text-blue-600 hover:text-blue-800">View Details</a>
-          <a href="#" className="text-red-600 hover:text-red-800">Force Clock Out</a>
+          <a 
+            href="#" 
+            className="text-blue-600 hover:text-blue-800"
+            onClick={(e) => {
+              e.preventDefault();
+              // TODO: Implement view details
+              console.log('View details for:', record);
+            }}
+          >
+            View Details
+          </a>
+          <a 
+            href="#" 
+            className="text-red-600 hover:text-red-800"
+            onClick={(e) => {
+              e.preventDefault();
+              // TODO: Implement force clock out
+              console.log('Force clock out for:', record);
+            }}
+          >
+            Force Clock Out
+          </a>
         </div>
       ),
     },
   ];
 
   // Calculate summary statistics
-  const totalActive = activeStaffData.length;
-  const averageDuration = activeStaffData.reduce((total, staff) => {
-    const hours = parseFloat(staff.duration.replace('h', '').replace('m', '')) || 0;
-    return total + hours;
-  }, 0) / totalActive;
+  const totalActive = staffWithDuration.length;
+  const averageDuration = totalActive > 0 
+    ? staffWithDuration.reduce((total, staff) => total + staff.durationMinutes, 0) / totalActive / 60
+    : 0;
 
-  const locationCounts = activeStaffData.reduce((counts, staff) => {
-    const location = staff.location.split(' - ')[0]; // Get just the center name
-    counts[location] = (counts[location] || 0) + 1;
-    return counts;
-  }, {} as Record<string, number>);
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <Title level={2}>Active Staff</Title>
+          <p className="text-gray-600">Loading active staff...</p>
+        </div>
+        <div className="flex justify-center items-center p-8">
+          <Spin size="large" />
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <Title level={2}>Active Staff</Title>
+          <p className="text-gray-600">Staff currently clocked in - {dayjs().format('MMMM DD, YYYY')}</p>
+        </div>
+        <Alert
+          message="Error Loading Active Staff"
+          description={error}
+          type="error"
+          showIcon
+          action={
+            <button 
+              onClick={fetchActiveStaff}
+              className="bg-red-500 text-white px-4 py-1 rounded hover:bg-red-600"
+            >
+              Retry
+            </button>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -145,7 +238,7 @@ const ActiveStaff: React.FC = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="text-center">
           <div className="text-2xl font-bold text-green-600 mb-2">{totalActive}</div>
           <div className="text-gray-600">Currently Active</div>
@@ -158,44 +251,43 @@ const ActiveStaff: React.FC = () => {
         </Card>
         <Card className="text-center">
           <div className="text-2xl font-bold text-purple-600 mb-2">
-            {Object.keys(locationCounts).length}
+            {totalActive > 0 ? Math.max(...staffWithDuration.map(s => s.durationMinutes)) : 0}m
           </div>
-          <div className="text-gray-600">Active Locations</div>
-        </Card>
-        <Card className="text-center">
-          <div className="text-2xl font-bold text-orange-600 mb-2">
-            {Math.max(...Object.values(locationCounts), 0)}
-          </div>
-          <div className="text-gray-600">Max Per Location</div>
+          <div className="text-gray-600">Longest Shift</div>
         </Card>
       </div>
 
       {/* Active Staff Table */}
-      <Card title="Currently Clocked In Staff">
-        <Table
-          columns={columns}
-          dataSource={activeStaffData}
-          rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total, range) => 
-              `${range[0]}-${range[1]} of ${total} active staff members`,
-          }}
-          scroll={{ x: 800 }}
-        />
-      </Card>
-
-      {/* Location Breakdown */}
-      <Card title="Staff Distribution by Location">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Object.entries(locationCounts).map(([location, count]) => (
-            <div key={location} className="p-4 bg-gray-50 rounded-lg text-center">
-              <div className="text-lg font-bold text-blue-600">{count}</div>
-              <div className="text-sm text-gray-600">{location}</div>
-            </div>
-          ))}
-        </div>
+      <Card 
+        title="Currently Clocked In Staff"
+        extra={
+          <button 
+            onClick={fetchActiveStaff}
+            className="bg-blue-500 text-white px-4 py-1 rounded hover:bg-blue-600"
+          >
+            Refresh
+          </button>
+        }
+      >
+        {totalActive === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-gray-400 text-lg mb-2">No staff currently clocked in</div>
+            <div className="text-gray-500 text-sm">Staff members will appear here when they clock in</div>
+          </div>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={staffWithDuration}
+            rowKey="id"
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showTotal: (total, range) => 
+                `${range[0]}-${range[1]} of ${total} active staff members`,
+            }}
+            scroll={{ x: 800 }}
+          />
+        )}
       </Card>
     </div>
   );

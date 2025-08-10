@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, Input, Button, Typography, Space, message, Row, Col, Divider, Alert } from 'antd';
-import { EnvironmentOutlined, SaveOutlined, EditOutlined, AimOutlined, LoadingOutlined } from '@ant-design/icons';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents } from 'react-leaflet';
+import { AimOutlined, EnvironmentOutlined, LoadingOutlined, SaveOutlined } from '@ant-design/icons';
+import { Button, Card, Col, Form, Input, InputNumber, Row, Space, Typography, message } from 'antd';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import React, { useEffect, useState } from 'react';
+import { Circle, MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
 
 const { Title, Text } = Typography;
 
-// Fix for default markers in react-leaflet
+// Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -14,440 +15,332 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-interface LocationData {
-  lat: number;
-  lng: number;
+interface GlobalLocation {
+  id: string;
   name: string;
-  timestamp: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
 }
 
-interface MapClickHandlerProps {
-  onLocationSelect: (lat: number, lng: number) => void;
+interface LocationMarkerProps {
+  position: [number, number] | null;
+  setPosition: (position: [number, number] | null) => void;
+  form: any;
 }
 
-const MapClickHandler: React.FC<MapClickHandlerProps> = ({ onLocationSelect }) => {
+const LocationMarker: React.FC<LocationMarkerProps> = ({ position, setPosition, form }) => {
   useMapEvents({
-    click: (e) => {
+    click(e) {
       const { lat, lng } = e.latlng;
-      onLocationSelect(lat, lng);
+      setPosition([lat, lng]);
+      form.setFieldsValue({ latitude: lat, longitude: lng });
+      message.success(`Location selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
     },
   });
-  return null;
+
+  return position ? (
+    <>
+      <Marker position={position} />
+      <Circle 
+        center={position} 
+        radius={form.getFieldValue('radius') || 2000}
+        pathOptions={{ 
+          color: 'blue', 
+          fillColor: 'blue', 
+          fillOpacity: 0.1 
+        }} 
+      />
+    </>
+  ) : null;
 };
 
 const LocationManager: React.FC = () => {
-  const [location, setLocation] = useState<LocationData | null>(null);
-  const [locationName, setLocationName] = useState<string>('');
-  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [globalLocation, setGlobalLocation] = useState<GlobalLocation | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [geoLoading, setGeoLoading] = useState<boolean>(false);
-  const [geoError, setGeoError] = useState<string>('');
-  const mapRef = useRef<L.Map | null>(null);
+  const [position, setPosition] = useState<[number, number] | null>(null);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([37.7749, -122.4194]); // Default to SF
+  const [form] = Form.useForm();
 
-  // Default center (San Francisco)
-  const defaultCenter: [number, number] = [37.7749, -122.4194];
-  const radiusInMeters = 2000; // 2km radius
-
-  // Load saved location on component mount
   useEffect(() => {
-    loadSavedLocation();
+    fetchGlobalLocation();
+    getCurrentLocationForMap();
   }, []);
 
-  const loadSavedLocation = () => {
+  const fetchGlobalLocation = async () => {
     try {
-      const savedLocation = localStorage.getItem('clockin-location');
-      if (savedLocation) {
-        const locationData: LocationData = JSON.parse(savedLocation);
-        setLocation(locationData);
-        setLocationName(locationData.name);
-        message.success('Saved location loaded successfully');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/locations`);
+      if (response.ok) {
+        const locations = await response.json();
+        if (locations.length > 0) {
+          const location = locations[0];
+          setGlobalLocation(location);
+          form.setFieldsValue(location);
+          setPosition([location.latitude, location.longitude]);
+          setMapCenter([location.latitude, location.longitude]);
+        }
       }
     } catch (error) {
-      console.error('Error loading saved location:', error);
-      message.error('Failed to load saved location');
+      console.error('Error fetching location:', error);
     }
   };
 
-  const getCurrentLocation = async () => {
-    setGeoLoading(true);
-    setGeoError('');
-
+  const getCurrentLocationForMap = () => {
     if (!navigator.geolocation) {
-      setGeoError('Geolocation is not supported by this browser');
-      setGeoLoading(false);
-      message.error('Geolocation is not supported by this browser');
+      message.warning('Geolocation is not supported by this browser');
       return;
     }
-
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000
-    };
 
     navigator.geolocation.getCurrentPosition(
-      async (position) => {
+      (position) => {
         const { latitude, longitude } = position.coords;
-        
-        try {
-          // Reverse geocoding using Nominatim (OpenStreetMap)
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            const placeName = data.display_name || `Location at ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-            
-            // Extract a more readable name from the address components
-            let readableName = '';
-            if (data.address) {
-              const address = data.address;
-              if (address.hospital || address.clinic) {
-                readableName = address.hospital || address.clinic;
-              } else if (address.building || address.house_name) {
-                readableName = address.building || address.house_name;
-              } else if (address.road && address.house_number) {
-                readableName = `${address.house_number} ${address.road}`;
-              } else if (address.road) {
-                readableName = address.road;
-              } else if (address.neighbourhood || address.suburb) {
-                readableName = address.neighbourhood || address.suburb;
-              } else {
-                readableName = placeName.split(',')[0]; // Take first part of display name
-              }
-            }
-            
-            const detectedLocation: LocationData = {
-              lat: latitude,
-              lng: longitude,
-              name: readableName || `Current Location`,
-              timestamp: new Date().toISOString(),
-            };
-            
-            setLocation(detectedLocation);
-            setLocationName(readableName || 'Current Location');
-            setIsEditing(true);
-            
-            message.success('Current location detected successfully!');
-          } else {
-            throw new Error('Failed to get location name');
-          }
-        } catch (error) {
-          console.error('Error getting location name:', error);
-          
-          // Fallback: use coordinates without name
-          const fallbackLocation: LocationData = {
-            lat: latitude,
-            lng: longitude,
-            name: `Location at ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-            timestamp: new Date().toISOString(),
-          };
-          
-          setLocation(fallbackLocation);
-          setLocationName(fallbackLocation.name);
-          setIsEditing(true);
-          
-          message.warning('Location detected but could not get place name');
-        }
-        
-        setGeoLoading(false);
+        setMapCenter([latitude, longitude]);
       },
-      (error) => {
-        let errorMessage = '';
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage = 'Location access denied by user';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage = 'Location information is unavailable';
-            break;
-          case error.TIMEOUT:
-            errorMessage = 'Location request timed out';
-            break;
-          default:
-            errorMessage = 'An unknown error occurred while getting location';
-            break;
-        }
-        
-        setGeoError(errorMessage);
-        setGeoLoading(false);
-        message.error(errorMessage);
+      () => {
+        console.log('Could not get current location for map center');
       },
-      options
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 60000
+      }
     );
   };
-  const handleLocationSelect = (lat: number, lng: number) => {
-    const newLocation: LocationData = {
-      lat,
-      lng,
-      name: locationName,
-      timestamp: new Date().toISOString(),
-    };
-    setLocation(newLocation);
-    setIsEditing(true);
-    message.info('Location selected. Click "Save Location" to confirm.');
-  };
 
-  const handleSaveLocation = async () => {
-    if (!location) {
-      message.warning('Please select a location on the map first');
+  const getCurrentLocation = () => {
+    setGeoLoading(true);
+    
+    if (!navigator.geolocation) {
+      message.error('Geolocation is not supported by this browser');
+      setGeoLoading(false);
       return;
     }
 
-    if (!locationName.trim()) {
-      message.warning('Please enter a location name');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const newPosition: [number, number] = [latitude, longitude];
+        setPosition(newPosition);
+        setMapCenter(newPosition);
+        form.setFieldsValue({ latitude, longitude });
+        setGeoLoading(false);
+        message.success('Current location detected!');
+      },
+      () => {
+        setGeoLoading(false);
+        message.error('Failed to get current location. Please click on the map to select.');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      }
+    );
+  };
+
+  const handleSave = async (values: any) => {
+    if (!position) {
+      message.error('Please select a location on the map first!');
       return;
     }
 
     setLoading(true);
+    
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const locationToSave: LocationData = {
-        ...location,
-        name: locationName.trim(),
-        timestamp: new Date().toISOString(),
+      const method = globalLocation ? 'PATCH' : 'POST';
+      const url = globalLocation 
+        ? `${import.meta.env.VITE_API_URL}/api/locations/${globalLocation.id}`
+        : `${import.meta.env.VITE_API_URL}/api/locations`;
+
+      const payload = {
+        ...values,
+        latitude: position[0],
+        longitude: position[1]
       };
 
-      // Save to localStorage (simulating backend)
-      localStorage.setItem('clockin-location', JSON.stringify(locationToSave));
-      
-      setLocation(locationToSave);
-      setIsEditing(false);
-      
-      message.success('Clock-in location saved successfully!');
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const savedLocation = await response.json();
+        setGlobalLocation(savedLocation);
+        message.success(globalLocation ? 'Location updated successfully!' : 'Location created successfully!');
+      } else {
+        const error = await response.json();
+        message.error(error.error || 'Failed to save location');
+      }
     } catch (error) {
-      console.error('Error saving location:', error);
-      message.error('Failed to save location. Please try again.');
+      message.error('Failed to save location');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEditMode = () => {
-    setIsEditing(true);
-    message.info('Edit mode enabled. Click on the map to select a new location.');
-  };
-
-  const handleCancelEdit = () => {
-    if (location) {
-      setLocationName(location.name);
-    }
-    setIsEditing(false);
-    message.info('Edit cancelled');
-  };
-
-  const mapCenter: [number, number] = location ? [location.lat, location.lng] : defaultCenter;
-
   return (
-    <div className="w-full max-w-6xl mx-auto p-4 space-y-6">
+    <div className="max-w-6xl mx-auto p-4">
       <Card>
         <div className="mb-6">
           <Title level={2} className="flex items-center gap-2 mb-2">
             <EnvironmentOutlined className="text-blue-600" />
-            Clock-in Location Manager
+            Global Clock-in Location
           </Title>
           <Text type="secondary">
-            Set and manage the clock-in location for healthcare staff. Click on the map to select a location.
+            Click on the map to select the global location where care workers can clock in. Care workers must be within the specified radius to clock in.
           </Text>
         </div>
 
-        <Row gutter={[24, 24]}>
-          {/* Map Section */}
-          <Col xs={24} lg={16}>
-            <Card title="Select Location" size="small" className="h-full">
-              <div className="mb-4">
-                <Text type="secondary" className="text-sm">
-                  Click anywhere on the map to set the clock-in location. The blue circle shows the 2km radius.
-                </Text>
-              </div>
-              
-              <div className="relative">
-                <MapContainer
-                  center={mapCenter}
-                  zoom={13}
-                  style={{ height: '400px', width: '100%' }}
-                  className="rounded-lg border border-gray-200"
-                  ref={mapRef}
+        <Row gutter={24}>
+          <Col xs={24} lg={12}>
+            <Form 
+              form={form} 
+              layout="vertical" 
+              onFinish={handleSave}
+              initialValues={{ radius: 2000 }}
+            >
+              <Form.Item
+                name="name"
+                label="Location Name"
+                rules={[{ required: true, message: 'Please enter a location name' }]}
+              >
+                <Input placeholder="e.g., Main Healthcare Center" />
+              </Form.Item>
+
+              <Form.Item
+                name="address"
+                label="Address"
+                rules={[{ required: true, message: 'Please enter the address' }]}
+              >
+                <Input placeholder="e.g., 123 Main Street, City, State" />
+              </Form.Item>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Form.Item
+                  name="latitude"
+                  label="Latitude"
+                  rules={[{ required: true, message: 'Please select location on map' }]}
                 >
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  <InputNumber 
+                    placeholder="Select on map" 
+                    className="w-full"
+                    precision={6}
+                    step={0.000001}
+                    readOnly
                   />
-                  
-                  <MapClickHandler onLocationSelect={handleLocationSelect} />
-                  
-                  {location && (
-                    <>
-                      <Marker position={[location.lat, location.lng]}>
-                        <Popup>
-                          <div className="text-center">
-                            <strong>Current Clock-in Zone</strong>
-                            <br />
-                            {location.name || 'Unnamed Location'}
-                            <br />
-                            <small>
-                              {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
-                            </small>
-                          </div>
-                        </Popup>
-                      </Marker>
-                      
-                      <Circle
-                        center={[location.lat, location.lng]}
-                        radius={radiusInMeters}
-                        pathOptions={{
-                          color: '#1890ff',
-                          fillColor: '#1890ff',
-                          fillOpacity: 0.1,
-                          weight: 2,
-                        }}
-                      />
-                    </>
-                  )}
-                </MapContainer>
+                </Form.Item>
+
+                <Form.Item
+                  name="longitude"
+                  label="Longitude"
+                  rules={[{ required: true, message: 'Please select location on map' }]}
+                >
+                  <InputNumber 
+                    placeholder="Select on map" 
+                    className="w-full"
+                    precision={6}
+                    step={0.000001}
+                    readOnly
+                  />
+                </Form.Item>
               </div>
-            </Card>
+
+              <Form.Item
+                name="radius"
+                label="Allowed Radius (meters)"
+                rules={[{ required: true, message: 'Please enter the radius' }]}
+              >
+                <InputNumber 
+                  placeholder="2000" 
+                  className="w-full"
+                  min={100}
+                  max={10000}
+                  step={100}
+                  addonAfter="meters"
+                  onChange={() => {
+                    // Trigger map update when radius changes
+                    setTimeout(() => {
+                      setPosition(position); // Force re-render of circle
+                    }, 100);
+                  }}
+                />
+              </Form.Item>
+
+              <Space className="w-full" direction="vertical" size="large">
+                <Button
+                  type="default"
+                  icon={geoLoading ? <LoadingOutlined /> : <AimOutlined />}
+                  onClick={getCurrentLocation}
+                  loading={geoLoading}
+                  size="large"
+                  className="w-full"
+                >
+                  {geoLoading ? 'Getting Location...' : 'Use Current Location'}
+                </Button>
+
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  htmlType="submit"
+                  loading={loading}
+                  size="large"
+                  className="w-full"
+                  disabled={!position}
+                >
+                  {globalLocation ? 'Update Location' : 'Save Location'}
+                </Button>
+              </Space>
+            </Form>
           </Col>
 
-          {/* Controls Section */}
-          <Col xs={24} lg={8}>
-            <Card title="Location Details" size="small" className="h-full">
-              <Space direction="vertical" className="w-full" size="large">
-                {/* Location Name Input */}
-                <div>
-                  <Text strong className="block mb-2">Location Name</Text>
-                  <Input
-                    placeholder="e.g., Main Hospital Entrance"
-                    value={locationName}
-                    onChange={(e) => setLocationName(e.target.value)}
-                    disabled={!isEditing && location !== null}
-                    prefix={<EnvironmentOutlined />}
-                    size="large"
-                  />
-                </div>
-
-                {/* Coordinates Display */}
-                {location && (
-                  <div>
-                    <Text strong className="block mb-2">Coordinates</Text>
-                    <div className="bg-gray-50 p-3 rounded border">
-                      <div className="grid grid-cols-1 gap-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Latitude:</span>
-                          <span className="font-mono">{location.lat.toFixed(6)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Longitude:</span>
-                          <span className="font-mono">{location.lng.toFixed(6)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Radius:</span>
-                          <span>2.0 km</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Last Updated */}
-                {location && !isEditing && (
-                  <div>
-                    <Text strong className="block mb-2">Last Updated</Text>
-                    <Text type="secondary" className="text-sm">
-                      {new Date(location.timestamp).toLocaleString()}
-                    </Text>
-                  </div>
-                )}
-
-                <Divider className="my-4" />
-
-                {/* Action Buttons */}
-                <div className="space-y-3">
-                  {/* Get Current Location Button */}
-                  <Button
-                    type="default"
-                    icon={geoLoading ? <LoadingOutlined /> : <AimOutlined />}
-                    onClick={getCurrentLocation}
-                    loading={geoLoading}
-                    size="large"
-                    className="w-full"
-                    disabled={loading}
-                  >
-                    {geoLoading ? 'Getting Location...' : 'Use Current Location'}
-                  </Button>
-                  
-                  {geoError && (
-                    <Alert
-                      message="Location Error"
-                      description={geoError}
-                      type="warning"
-                      showIcon
-                      closable
-                      onClose={() => setGeoError('')}
-                      className="text-xs"
-                    />
-                  )}
-
-                  {!location || isEditing ? (
-                    <Space className="w-full" direction="vertical">
-                      <Button
-                        type="primary"
-                        icon={<SaveOutlined />}
-                        onClick={handleSaveLocation}
-                        loading={loading}
-                        disabled={!location || !locationName.trim()}
-                        size="large"
-                        className="w-full"
-                      >
-                        Save Location
-                      </Button>
-                      
-                      {isEditing && location && (
-                        <Button
-                          onClick={handleCancelEdit}
-                          size="large"
-                          className="w-full"
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                    </Space>
-                  ) : (
-                    <Button
-                      type="default"
-                      icon={<EditOutlined />}
-                      onClick={handleEditMode}
-                      size="large"
-                      className="w-full"
-                    >
-                      Edit Location
-                    </Button>
-                  )}
-                </div>
-
-                {/* Instructions */}
-                <div className="bg-blue-50 p-3 rounded border border-blue-200">
-                  <Text className="text-blue-800 text-sm">
-                    <strong>Instructions:</strong>
-                    <br />
-                    1. Click anywhere on the map to select a location
-                    <br />
-                    2. Enter a descriptive name for the location
-                    <br />
-                    3. Click "Save Location" to confirm
-                    <br />
-                    4. Staff can clock in within the 2km radius
-                  </Text>
-                  <br /><br />
-                  <Text className="text-blue-800 text-sm"><strong>Tip:</strong> Use "Current Location" to automatically detect your position and get the place name.</Text>
-                </div>
-              </Space>
-            </Card>
+          <Col xs={24} lg={12}>
+            <div className="mb-4">
+              <Title level={4}>Select Location on Map</Title>
+              <Text type="secondary">Click anywhere on the map to set the clock-in location</Text>
+            </div>
+            
+            <div style={{ height: '500px', width: '100%' }}>
+              <MapContainer 
+                center={mapCenter} 
+                zoom={13} 
+                style={{ height: '100%', width: '100%' }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <LocationMarker position={position} setPosition={setPosition} form={form} />
+              </MapContainer>
+            </div>
           </Col>
         </Row>
+
+        {globalLocation && (
+          <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded">
+            <Text strong className="text-green-800">Current Global Location:</Text>
+            <div className="mt-2 text-sm">
+              <div><strong>Name:</strong> {globalLocation.name}</div>
+              <div><strong>Address:</strong> {globalLocation.address}</div>
+              <div><strong>Coordinates:</strong> {globalLocation.latitude}, {globalLocation.longitude}</div>
+              <div><strong>Radius:</strong> {globalLocation.radius}m ({(globalLocation.radius/1000).toFixed(1)}km)</div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded">
+          <Text className="text-blue-800 text-sm">
+            <strong>Instructions:</strong><br />
+            1. Click on the map to select the exact location or use "Current Location"<br />
+            2. The blue circle shows the 2km radius where care workers can clock in<br />
+            3. Fill in the location name and address<br />
+            4. Save the location - this will be the global clock-in location for all care workers
+          </Text>
+        </div>
       </Card>
     </div>
   );
