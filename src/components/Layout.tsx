@@ -1,5 +1,4 @@
 import {
-    ClockCircleOutlined,
     EnvironmentOutlined,
     FileTextOutlined,
     HomeOutlined,
@@ -30,11 +29,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       key: '/dashboard',
       icon: <HomeOutlined />,
       label: 'Dashboard',
-    },
-    {
-      key: '/clock-in',
-      icon: <ClockCircleOutlined />,
-      label: 'Clock In/Out',
     },
     {
       key: '/history',
