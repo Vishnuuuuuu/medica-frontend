@@ -1,5 +1,6 @@
 import { ClockCircleOutlined, TeamOutlined, TrophyOutlined, UserOutlined } from '@ant-design/icons';
 import { Alert, Card, Col, Row, Spin, Statistic, Table, Typography } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import React, { useEffect, useState } from 'react';
 
@@ -118,12 +119,14 @@ const Dashboard: React.FC = () => {
 
   const staffStats = getStaffStats();
 
-  const columns = [
+  const columns: ColumnsType<StaffStats> = [
     {
       title: 'Staff Member',
       dataIndex: 'name',
       key: 'name',
       sorter: (a: StaffStats, b: StaffStats) => a.name.localeCompare(b.name),
+      width: '30%',
+      ellipsis: true,
     },
     {
       title: 'Total Hours',
@@ -131,6 +134,8 @@ const Dashboard: React.FC = () => {
       key: 'totalHours',
       sorter: (a: StaffStats, b: StaffStats) => a.totalHours - b.totalHours,
       render: (hours: number) => hours > 0 ? `${hours.toFixed(1)}h` : 'No shifts',
+      width: '25%',
+      responsive: ['sm'],
     },
     {
       title: 'Shifts',
@@ -138,13 +143,16 @@ const Dashboard: React.FC = () => {
       key: 'shiftsCount',
       sorter: (a: StaffStats, b: StaffStats) => a.shiftsCount - b.shiftsCount,
       render: (count: number) => count > 0 ? count : 'No shifts',
+      width: '20%',
     },
     {
-      title: 'Average Hours/Shift',
+      title: 'Avg Hours/Shift',
       dataIndex: 'averageHours',
       key: 'averageHours',
       sorter: (a: StaffStats, b: StaffStats) => a.averageHours - b.averageHours,
       render: (hours: number) => hours > 0 ? `${hours.toFixed(1)}h` : 'No shifts',
+      width: '25%',
+      responsive: ['md'],
     },
   ];
 
@@ -272,18 +280,25 @@ const Dashboard: React.FC = () => {
 
       {/* Staff Hours Table */}
       <Card title="Staff Performance - Last 7 Days">
-        <Table
-          columns={columns}
-          dataSource={staffStats}
-          rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: false,
-            showTotal: (total, range) => 
-              `${range[0]}-${range[1]} of ${total} staff members`,
-          }}
-          size="middle"
-        />
+        <div style={{ overflowX: 'auto' }}>
+          <Table
+            columns={columns}
+            dataSource={staffStats}
+            rowKey="id"
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: false,
+              showTotal: (total, range) => 
+                `${range[0]}-${range[1]} of ${total} staff members`,
+              simple: window.innerWidth < 768, // Use simple pagination on mobile
+            }}
+            size="small"
+            scroll={{ x: 400 }} // Enable horizontal scroll on small screens
+            style={{
+              fontSize: window.innerWidth < 768 ? '12px' : '14px',
+            }}
+          />
+        </div>
       </Card>
 
       {/* Quick Actions */}
