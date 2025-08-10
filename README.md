@@ -2,6 +2,23 @@
 
 A modern React-based frontend application for managing care workers and managers in medical facilities, built with Auth0 authentication, real-time location tracking, and role-based access control.
 
+## 🌐 **Live Demo**
+
+**Frontend URL:** [https://medica-frontend.vercel.app/](https://medica-frontend.vercel.app/)  
+**Backend API:** [https://medica-backend-xovg.onrender.com](https://medica-backend-xovg.onrender.com)
+
+## 🔐 **Test Credentials**
+
+### **Admin/Manager Account:**
+- **Email:** `itsvishnups@admin.com`
+- **Password:** `Vishnu@123`
+- **Role:** Manager (Full access to dashboard, staff management, analytics)
+
+### **Authentication:**
+- Uses **Auth0** for secure authentication
+- **Role-based access control** with automatic user role assignment
+- **Google OAuth** also supported for quick signup
+
 ## 🚀 Features
 
 ### Authentication & Authorization
